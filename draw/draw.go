@@ -7,8 +7,8 @@ import (
 	"github.com/thibran/table/row"
 )
 
-// Draw objct.
-type Draw struct {
+// Drawer objct.
+type Drawer struct {
 	LineHeadTop bool
 	LineHeadBot bool
 	LineHeadV   bool
@@ -21,25 +21,28 @@ type Draw struct {
 	HeadLineH rune
 	HeadLineV rune
 
-	BodyEdge  rune
-	BodyLineH rune
-	BodyLineV rune
-	ColumnCap row.ColumnCap
+	BodyEdge     rune
+	BodyLineH    rune
+	BodyLineV    rune
+	ColumnCap    row.ColumnCap
+	BytesWritten int64
+	Err          error
 	io.Writer
 }
 
-// Draw table.
-func (d *Draw) Draw(head row.Row, body ...row.Row) {
-	if len(head) > 0 {
-		d.head(head)
-		d.writeString("\n")
+// Row writes a single row into the io.Writer.
+func (d *Drawer) Row(r row.Row, isHeader, firstBodyRow bool) {
+	if isHeader {
+		d.head(r)
+		return
 	}
-	if len(body) > 0 {
-		d.body(body)
+	if len(r) > 0 {
+		d.body(r, firstBodyRow)
 	}
+	return
 }
 
-func (d *Draw) head(r row.Row) {
+func (d *Drawer) head(r row.Row) {
 	edge := d.edgeRune(false)
 	hline := d.hlineRune(false)
 	vLine := d.isLineV(false)
@@ -50,18 +53,18 @@ func (d *Draw) head(r row.Row) {
 	// top line
 	if d.LineHeadTop {
 		d.lineH(hline, writeEdge)
-		d.writeString("\n")
+		d.writeRune('\n')
 	}
 	// header
 	d.writeRow(r, false)
 	// bottom line
 	if d.LineHeadBot {
-		d.writeString("\n")
+		d.writeRune('\n')
 		d.lineH(hline, writeEdge)
 	}
 }
 
-func (d *Draw) body(arr []row.Row) {
+func (d *Drawer) body(r row.Row, firstBodyRow bool) {
 	edge := d.edgeRune(true)
 	hline := d.hlineRune(true)
 	vLine := d.isLineV(true)
@@ -72,33 +75,39 @@ func (d *Draw) body(arr []row.Row) {
 	writeHline := func() {
 		d.lineH(hline, writeEdge)
 	}
-	size := len(arr)
-	for i, r := range arr {
-		d.bodyRow(r, i == 0, writeHline)
-		// add linebreak except on the last line
-		if i < size-1 {
-			d.writeString("\n")
-		}
+	d.bodyRow(r, firstBodyRow, writeHline)
+}
+
+func (d *Drawer) WriteBottomBodyLine() {
+	edge := d.edgeRune(true)
+	hline := d.hlineRune(true)
+	vLine := d.isLineV(true)
+	opositVlineTrue := d.isOpositVlineTrue(true)
+	writeEdge := func() {
+		d.writeEdge(vLine, opositVlineTrue, edge, hline)
 	}
-	// bottom line
 	if d.LineBodyBot {
-		d.writeString("\n")
+		d.writeRune('\n')
 		d.lineH(hline, writeEdge)
 	}
 }
 
-func (d *Draw) bodyRow(r row.Row, firstRow bool, writeHline func()) {
+func (d *Drawer) WriteNewline() {
+	d.writeRune('\n')
+}
+
+func (d *Drawer) bodyRow(r row.Row, firstRow bool, writeHline func()) {
 	// dont print a topline if there is already one
 	printFirstRow := firstRow && !d.LineHeadBot && d.LineBodyTop
 	printNonFirstRow := !firstRow && d.LineBodyTop
 	if printFirstRow || printNonFirstRow {
 		writeHline()
-		d.writeString("\n")
+		d.writeRune('\n')
 	}
 	d.writeRow(r, true)
 }
 
-func (d *Draw) writeRow(r row.Row, isBody bool) {
+func (d *Drawer) writeRow(r row.Row, isBody bool) {
 	d.lineV(isBody)
 	for i, cell := range r {
 		cell = row.TrimTextToMaxLength(cell, d.ColumnCap[i])
@@ -109,7 +118,7 @@ func (d *Draw) writeRow(r row.Row, isBody bool) {
 
 // writeEdge rune if either head or body vline is true (rune differs).
 // In the case that both are false, nothing is written.
-func (d *Draw) writeEdge(vLine, opositVlineTrue bool, edge, hline rune) {
+func (d *Drawer) writeEdge(vLine, opositVlineTrue bool, edge, hline rune) {
 	if vLine {
 		d.writeRune(edge)
 	} else if opositVlineTrue {
@@ -117,7 +126,7 @@ func (d *Draw) writeEdge(vLine, opositVlineTrue bool, edge, hline rune) {
 	}
 }
 
-func (d *Draw) lineH(hline rune, writeEdge func()) {
+func (d *Drawer) lineH(hline rune, writeEdge func()) {
 	// edge or hline rune, or nothing if vline head & body are false
 	writeEdge()
 	for _, count := range d.ColumnCap {
@@ -129,7 +138,7 @@ func (d *Draw) lineH(hline rune, writeEdge func()) {
 }
 
 // lineV prints the vline rune or a space if.
-func (d *Draw) lineV(isBody bool) {
+func (d *Drawer) lineV(isBody bool) {
 	if d.isLineV(isBody) {
 		r := d.vlineRune(isBody)
 		d.writeRune(r)
@@ -139,7 +148,7 @@ func (d *Draw) lineV(isBody bool) {
 }
 
 // isLineV returns true, if a vertical line should be drawn.
-func (d *Draw) isLineV(isBody bool) bool {
+func (d *Drawer) isLineV(isBody bool) bool {
 	if isBody {
 		return d.LineBodyV
 	}
@@ -147,7 +156,7 @@ func (d *Draw) isLineV(isBody bool) bool {
 }
 
 // edgeRune returns the head or body edge rune.
-func (d *Draw) edgeRune(isBody bool) rune {
+func (d *Drawer) edgeRune(isBody bool) rune {
 	if isBody {
 		return d.BodyEdge
 	}
@@ -155,7 +164,7 @@ func (d *Draw) edgeRune(isBody bool) rune {
 }
 
 // hlineRune returns the head or body hline rune.
-func (d *Draw) hlineRune(isBody bool) rune {
+func (d *Drawer) hlineRune(isBody bool) rune {
 	if isBody {
 		return d.BodyLineH
 	}
@@ -163,7 +172,7 @@ func (d *Draw) hlineRune(isBody bool) rune {
 }
 
 // vlineRune returns the head or body vline rune.
-func (d *Draw) vlineRune(isBody bool) rune {
+func (d *Drawer) vlineRune(isBody bool) rune {
 	if isBody {
 		return d.BodyLineV
 	}
@@ -171,25 +180,32 @@ func (d *Draw) vlineRune(isBody bool) rune {
 }
 
 // isOpositVlineTrue true, e.g. if HeadLineV True & BodyLineV False
-func (d *Draw) isOpositVlineTrue(isBody bool) bool {
+func (d *Drawer) isOpositVlineTrue(isBody bool) bool {
 	if isBody {
 		return d.LineHeadV == true
 	}
 	return d.LineBodyV == true
 }
 
-func (d *Draw) writeString(s string) {
-	io.WriteString(d, s)
+func (d *Drawer) writeString(s string) {
+	d.addBytesWritten(io.WriteString(d, s))
 }
 
-func (d *Draw) writeRune(r rune) {
+func (d *Drawer) writeRune(r rune) {
 	n := utf8.RuneLen(r)
 	buf := make([]byte, n)
 	utf8.EncodeRune(buf, r)
-	d.Write(buf)
+	d.addBytesWritten(d.Write(buf))
 }
 
-// func (d *Draw) Debug() string {
+func (d *Drawer) addBytesWritten(n int, err error) {
+	d.BytesWritten += int64(n)
+	if err != nil {
+		d.Err = err
+	}
+}
+
+// func (d *Drawer) Debug() string {
 // 	var buf bytes.Buffer
 // 	buf.WriteString(fmt.Sprintf("LineHeadTop: %v\n", d.LineHeadTop))
 // 	buf.WriteString(fmt.Sprintf("LineHeadBot: %v\n", d.LineHeadBot))

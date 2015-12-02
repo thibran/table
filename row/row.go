@@ -1,6 +1,7 @@
 package row
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"unicode/utf8"
@@ -12,80 +13,77 @@ type Row []string
 // ColumnCap holds the number of maximum runs for each column.
 type ColumnCap []int
 
-const itemCountNotEqual = `Number of items in the head and body []string must be
-equal if there are more than 0 of either of each.`
-
-func NewColumnCap(headRowLen, bodyRowLen int) ColumnCap {
-	if headRowLen > 0 {
-		return make(ColumnCap, headRowLen)
-	}
-	return make(ColumnCap, bodyRowLen)
-}
+var errItemCountNotEqual = errors.New(`Number of items in the head and body []string must be
+equal if there are more than 0 of either of each.`)
 
 // New Row object. Line break will be striped from the strings
-// and a whitespace added to the end.
-func New(arr []string) Row {
-	size := len(arr)
-	r := make(Row, size)
-	for i, s := range arr {
-		s = strings.Replace(s, "\n", "", -1)
-		s = strings.Replace(s, "\r", "", -1)
-		// whitespace, ignore last column
-		if i < size-1 {
-			r[i] = fmt.Sprintf("%s ", s)
-		} else {
-			r[i] = s
+// and n whitespace added to the end of the cell.
+func New(c ColumnCap, row []string, n uint8) Row {
+	// trim too long rows
+	if len(row) > len(c) {
+		row = row[:len(c)]
+	}
+	for i, cell := range row {
+		cell = purgeRunes(cell)
+		cell = trimCell(cell, c[i]-int(n))
+		row[i] = fmt.Sprintf("%s%s", cell, strings.Repeat(" ", int(n)))
+	}
+	return Row(row)
+}
+
+// trimCell if it is longer than max runes.
+func trimCell(cell string, max int) string {
+	if max < 0 {
+		max = 0
+	}
+	count := utf8.RuneCountInString(cell)
+	switch {
+	case count <= max: // do nothing
+		return cell
+	case max <= 3: // trim without adding dots
+		return cell[:max]
+	default: // trim + dots
+		return fmt.Sprintf("%s...", cell[:max-3])
+	}
+}
+
+// NewColumnCap calculate ColumnCap for the rows with n whitespace added.
+func NewColumnCap(rows [][]string, n uint8) ColumnCap {
+	c := make(ColumnCap, len(rows[0]))
+	for _, row := range rows {
+		for i, cell := range row {
+			cell = purgeRunes(cell)
+			count := utf8.RuneCountInString(cell) + int(n)
+			if count > c[i] {
+				c[i] = count
+			}
+			if c[i] == 0 {
+				c[i] = 1
+			}
 		}
 	}
-	return r
+	return c
 }
 
-func BodyToRow(
-	body [][]string,
-	bodyLen, headRowLen, bodyRowLen int,
-	columnCap ColumnCap,
-) ([]Row, error) {
-	arr := make([]Row, bodyLen)
-
-	for i := 0; i < bodyLen; i++ {
-		r := New(body[i])
-		if err := r.CheckBodyRow(headRowLen, bodyRowLen); err != nil {
-			return nil, fmt.Errorf(itemCountNotEqual)
+// ConvRunesPerColumn calculates ColumnCap (incorporate added whitespace n).
+func ConvRunesPerColumn(runesPerColumn []int, n uint8) ColumnCap {
+	c := make(ColumnCap, len(runesPerColumn))
+	for i, count := range runesPerColumn {
+		if count <= 0 {
+			count = 0
 		}
-		columnCap = r.MaxRuneCount(columnCap)
-		arr[i] = r
-	}
-	return arr, nil
-}
-
-func (r Row) CheckBodyRow(headRowLen, bodyRowLen int) error {
-	// check if row has same amount of items than head
-	if headRowLen > 0 && headRowLen != bodyRowLen {
-		return fmt.Errorf(itemCountNotEqual)
-	}
-	// check if row has equal itmes
-	if bodyRowLen != len(r) {
-		return fmt.Errorf(itemCountNotEqual)
-	}
-	return nil
-}
-
-func (r Row) MaxRuneCount(arr ColumnCap) ColumnCap {
-	var count int
-	for i, cell := range r {
-		count = utf8.RuneCountInString(cell)
-		if count > arr[i] {
-			arr[i] = count
+		c[i] = count + int(n)
+		if c[i] == 0 {
+			c[i] = 1
 		}
 	}
-	return arr
+	return c
 }
 
-func CheckElemets(headRowLen, bodyRowLen, bodyLen int) error {
-	if headRowLen > 0 && bodyLen > 0 && headRowLen != bodyRowLen {
-		return fmt.Errorf(itemCountNotEqual)
-	}
-	return nil
+func purgeRunes(cell string) string {
+	cell = strings.Replace(cell, "\n", "", -1)
+	cell = strings.Replace(cell, "\r", "", -1)
+	return cell
 }
 
 // TrimTextToMaxLength enlarges too short stings.

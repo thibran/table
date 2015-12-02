@@ -22,7 +22,7 @@ func (s *Style) isAllEmpty() bool {
 	return s.edge == ' ' && s.lineH == ' ' && s.lineV == ' '
 }
 
-func (s *Style) isAllEmptyH() bool {
+func (s *Style) isEmptyH() bool {
 	return s.edge == ' ' && s.lineH == ' '
 }
 

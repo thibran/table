@@ -9,19 +9,40 @@ import (
 )
 
 type bufDrawer struct {
-	Draw
+	Drawer
 	*bytes.Buffer
 }
 
 func newBufDrawer() *bufDrawer {
 	var buf bytes.Buffer
 	return &bufDrawer{
-		Draw: Draw{
+		Drawer: Drawer{
 			ColumnCap: []int{3, 3},
 			Writer:    &buf,
 		},
 		Buffer: &buf,
 	}
+}
+
+func (d *bufDrawer) writeAll(rows []row.Row, header bool) {
+	var firstBodyRow bool
+	for i, r := range rows {
+		// check if its the first body row
+		if i == 0 && !header {
+			firstBodyRow = true
+		} else if i == 1 && header {
+			firstBodyRow = true
+		} else {
+			firstBodyRow = false
+		}
+		d.Row(r, i == 0 && header, firstBodyRow)
+		// print linebreak between rows, except the last row
+		if i < len(rows)-1 {
+			fmt.Fprintln(d)
+		}
+	}
+	// print last line after the last row, if any
+	d.WriteBottomBodyLine()
 }
 
 func (d *bufDrawer) bodyRowTest(r row.Row, firstRow bool) {
@@ -40,6 +61,34 @@ func (d *bufDrawer) bodyRowTest(r row.Row, firstRow bool) {
 
 func err(exp, res string) error {
 	return fmt.Errorf("\n\nshould be:\n%s\n\nbut is:\n%s", exp, res)
+}
+
+func TestHead_checkByteCount(t *testing.T) {
+	d := newBufDrawer()
+	r := row.Row{"h1 ", "h2 "}
+	d.head(r)
+	res := d.BytesWritten
+	exp := int64(len("h1 h2 "))
+	if res != exp {
+		t.Errorf("written bytes should be %d but are %d", exp, res)
+	}
+}
+
+func TestHead_checkByteCount_multiline(t *testing.T) {
+	d := newBufDrawer()
+	d.LineHeadBot = true
+	d.LineHeadV = true
+	d.LineBodyV = true
+	d.HeadEdge = '+'
+	d.HeadLineH = '='
+	d.HeadLineV = '|'
+	r := row.Row{"h1 ", "h2 "}
+	d.head(r)
+	res := d.BytesWritten
+	exp := int64(len("|h1 |h2 |\n+===+===+"))
+	if res != exp {
+		t.Errorf("written bytes should be %d but are %d", exp, res)
+	}
 }
 
 func TestHead_onlyText(t *testing.T) {
@@ -243,11 +292,11 @@ func TestBody_onlyText(t *testing.T) {
 	d.BodyEdge = '#'
 	d.BodyLineH = '-'
 	d.BodyLineV = 'I'
-	arr := []row.Row{
+	rows := []row.Row{
 		{"a1 ", "a2 "},
 		{"b1 ", "b2 "},
 	}
-	d.body(arr)
+	d.writeAll(rows, false)
 	s := d.String()
 	exp := "a1 a2 \nb1 b2 "
 	if s != exp {
@@ -264,11 +313,11 @@ func TestBody_bottomLine(t *testing.T) {
 	d.BodyEdge = '#'
 	d.BodyLineH = '-'
 	d.BodyLineV = 'I'
-	arr := []row.Row{
+	rows := []row.Row{
 		{"a1 ", "a2 "},
 		{"b1 ", "b2 "},
 	}
-	d.body(arr)
+	d.writeAll(rows, false)
 	s := d.String()
 	exp := "a1 a2 \nb1 b2 \n------"
 	if s != exp {
@@ -285,11 +334,11 @@ func TestBody_topLine(t *testing.T) {
 	d.BodyEdge = '#'
 	d.BodyLineH = '-'
 	d.BodyLineV = 'I'
-	arr := []row.Row{
+	rows := []row.Row{
 		{"a1 ", "a2 "},
 		{"b1 ", "b2 "},
 	}
-	d.body(arr)
+	d.writeAll(rows, false)
 	s := d.String()
 	exp := "------\na1 a2 \n------\nb1 b2 "
 	if s != exp {
@@ -297,7 +346,7 @@ func TestBody_topLine(t *testing.T) {
 	}
 }
 
-func TestBody_topLineFrom_LineHeadBotTrue(t *testing.T) {
+func TestBody_firstRowToplineFromBodyStyle(t *testing.T) {
 	d := newBufDrawer()
 	d.LineHeadBot = true
 	d.HeadEdge = '+'
@@ -307,11 +356,11 @@ func TestBody_topLineFrom_LineHeadBotTrue(t *testing.T) {
 	d.BodyEdge = '#'
 	d.BodyLineH = '-'
 	d.BodyLineV = 'I'
-	arr := []row.Row{
+	rows := []row.Row{
 		{"a1 ", "a2 "},
 		{"b1 ", "b2 "},
 	}
-	d.body(arr)
+	d.writeAll(rows, false)
 	s := d.String()
 	exp := "a1 a2 \n------\nb1 b2 "
 	if s != exp {
@@ -326,11 +375,11 @@ func TestBody_topLineFrom_vlineTrue(t *testing.T) {
 	d.BodyEdge = '#'
 	d.BodyLineH = '-'
 	d.BodyLineV = 'I'
-	arr := []row.Row{
+	rows := []row.Row{
 		{"a1 ", "a2 "},
 		{"b1 ", "b2 "},
 	}
-	d.body(arr)
+	d.writeAll(rows, false)
 	s := d.String()
 	exp := "Ia1 Ia2 I\nIb1 Ib2 I"
 	if s != exp {
@@ -338,14 +387,14 @@ func TestBody_topLineFrom_vlineTrue(t *testing.T) {
 	}
 }
 
-func TestDraw_onlyText(t *testing.T) {
+func TestWriteAll_onlyText(t *testing.T) {
 	d := newBufDrawer()
-	head := row.Row{"h1 ", "h2 "}
-	body := []row.Row{
+	rows := []row.Row{
+		{"h1 ", "h2 "},
 		{"a1 ", "a2 "},
 		{"b1 ", "b2 "},
 	}
-	d.Draw.Draw(head, body...)
+	d.writeAll(rows, true)
 	s := d.String()
 	exp := "h1 h2 \na1 a2 \nb1 b2 "
 	if s != exp {
@@ -353,7 +402,7 @@ func TestDraw_onlyText(t *testing.T) {
 	}
 }
 
-func TestDraw_headerTopLine(t *testing.T) {
+func TestWriteAll_headerTopLine(t *testing.T) {
 	d := newBufDrawer()
 	d.LineHeadTop = true
 	d.HeadEdge = '+'
@@ -362,12 +411,12 @@ func TestDraw_headerTopLine(t *testing.T) {
 	d.BodyEdge = '#'
 	d.BodyLineH = '-'
 	d.BodyLineV = 'I'
-	head := row.Row{"h1 ", "h2 "}
-	body := []row.Row{
+	rows := []row.Row{
+		{"h1 ", "h2 "},
 		{"a1 ", "a2 "},
 		{"b1 ", "b2 "},
 	}
-	d.Draw.Draw(head, body...)
+	d.writeAll(rows, true)
 	s := d.String()
 	exp := "======\nh1 h2 \na1 a2 \nb1 b2 "
 	if s != exp {
@@ -375,7 +424,7 @@ func TestDraw_headerTopLine(t *testing.T) {
 	}
 }
 
-func TestDraw_headerTopAndBottomLine(t *testing.T) {
+func TestWriteAll_headerTopAndBottomLine(t *testing.T) {
 	d := newBufDrawer()
 	d.LineHeadTop = true
 	d.LineHeadBot = true
@@ -385,12 +434,12 @@ func TestDraw_headerTopAndBottomLine(t *testing.T) {
 	d.BodyEdge = '#'
 	d.BodyLineH = '-'
 	d.BodyLineV = 'I'
-	head := row.Row{"h1 ", "h2 "}
-	body := []row.Row{
+	rows := []row.Row{
+		{"h1 ", "h2 "},
 		{"a1 ", "a2 "},
 		{"b1 ", "b2 "},
 	}
-	d.Draw.Draw(head, body...)
+	d.writeAll(rows, true)
 	s := d.String()
 	exp := "======\nh1 h2 \n======\na1 a2 \nb1 b2 "
 	if s != exp {
@@ -398,7 +447,7 @@ func TestDraw_headerTopAndBottomLine(t *testing.T) {
 	}
 }
 
-func TestDraw_bodyTopAndBottomLine(t *testing.T) {
+func TestWriteAll_bodyTopAndBottomLine(t *testing.T) {
 	d := newBufDrawer()
 	d.LineBodyTop = true
 	d.LineBodyBot = true
@@ -408,12 +457,13 @@ func TestDraw_bodyTopAndBottomLine(t *testing.T) {
 	d.BodyEdge = '#'
 	d.BodyLineH = '-'
 	d.BodyLineV = 'I'
-	head := row.Row{"h1 ", "h2 "}
-	body := []row.Row{
+	rows := []row.Row{
+		{"h1 ", "h2 "},
 		{"a1 ", "a2 "},
 		{"b1 ", "b2 "},
 	}
-	d.Draw.Draw(head, body...)
+	d.writeAll(rows, true)
+
 	s := d.String()
 	exp := "h1 h2 \n------\na1 a2 \n------\nb1 b2 \n------"
 	if s != exp {
@@ -421,24 +471,24 @@ func TestDraw_bodyTopAndBottomLine(t *testing.T) {
 	}
 }
 
-func TestDraw_bodyTopAndBottomLine_vlineBodyTrue(t *testing.T) {
+func TestWriteAll_bodyTopAndBottomLine_vlineBodyTrue(t *testing.T) {
 	d := newBufDrawer()
+	d.LineHeadV = false
 	d.LineBodyTop = true
 	d.LineBodyBot = true
 	d.LineBodyV = true
-	d.LineHeadV = false
 	d.HeadEdge = '+'
 	d.HeadLineH = '='
 	d.HeadLineV = '|'
 	d.BodyEdge = '#'
 	d.BodyLineH = '-'
 	d.BodyLineV = 'I'
-	head := row.Row{"h1 ", "h2 "}
-	body := []row.Row{
+	rows := []row.Row{
+		{"h1 ", "h2 "},
 		{"a1 ", "a2 "},
 		{"b1 ", "b2 "},
 	}
-	d.Draw.Draw(head, body...)
+	d.writeAll(rows, true)
 	s := d.String()
 	exp := " h1  h2  \n#---#---#\nIa1 Ia2 I\n#---#---#\nIb1 Ib2 I\n#---#---#"
 	if s != exp {
@@ -446,7 +496,7 @@ func TestDraw_bodyTopAndBottomLine_vlineBodyTrue(t *testing.T) {
 	}
 }
 
-func TestDraw_headTopAndBottomLine_vlineHeadTrue(t *testing.T) {
+func TestWriteAll_headTopAndBottomLine_vlineHeadTrue(t *testing.T) {
 	d := newBufDrawer()
 	d.LineHeadTop = true
 	d.LineHeadBot = true
@@ -458,12 +508,12 @@ func TestDraw_headTopAndBottomLine_vlineHeadTrue(t *testing.T) {
 	d.BodyEdge = '#'
 	d.BodyLineH = '-'
 	d.BodyLineV = 'I'
-	head := row.Row{"h1 ", "h2 "}
-	body := []row.Row{
+	rows := []row.Row{
+		{"h1 ", "h2 "},
 		{"a1 ", "a2 "},
 		{"b1 ", "b2 "},
 	}
-	d.Draw.Draw(head, body...)
+	d.writeAll(rows, true)
 	s := d.String()
 	exp := "+===+===+\n|h1 |h2 |\n+===+===+\n a1  a2  \n b1  b2  "
 	if s != exp {
@@ -471,7 +521,7 @@ func TestDraw_headTopAndBottomLine_vlineHeadTrue(t *testing.T) {
 	}
 }
 
-func TestDraw_headVlineFalse_bodyVlineTrue(t *testing.T) {
+func TestWriteAll_headVlineFalse_bodyVlineTrue(t *testing.T) {
 	d := newBufDrawer()
 	d.ColumnCap = row.ColumnCap{7, 6}
 	d.LineHeadTop = true
@@ -483,9 +533,11 @@ func TestDraw_headVlineFalse_bodyVlineTrue(t *testing.T) {
 	d.BodyEdge = 'o'
 	d.BodyLineH = '-'
 	d.BodyLineV = '|'
-	head := row.Row{"Name:", "Count:"}
-	body := []row.Row{{"Kenobi ", "1"}}
-	d.Draw.Draw(head, body...)
+	rows := []row.Row{
+		{"Name:", "Count:"},
+		{"Kenobi ", "1"},
+	}
+	d.writeAll(rows, true)
 	s := d.String()
 	exp := "================\n Name:   Count: \n================\n|Kenobi |1     |"
 	if s != exp {
@@ -493,7 +545,7 @@ func TestDraw_headVlineFalse_bodyVlineTrue(t *testing.T) {
 	}
 }
 
-func TestDraw_headVlineTrue_bodyVlineFalse(t *testing.T) {
+func TestWriteAll_headVlineTrue_bodyVlineFalse(t *testing.T) {
 	d := newBufDrawer()
 	d.ColumnCap = row.ColumnCap{7, 6}
 	d.LineBodyTop = true
@@ -505,9 +557,11 @@ func TestDraw_headVlineTrue_bodyVlineFalse(t *testing.T) {
 	d.BodyEdge = 'o'
 	d.BodyLineH = '-'
 	d.BodyLineV = '|'
-	head := row.Row{"Name:", "Count:"}
-	body := []row.Row{{"Kenobi ", "1"}}
-	d.Draw.Draw(head, body...)
+	rows := []row.Row{
+		{"Name:", "Count:"},
+		{"Kenobi ", "1"},
+	}
+	d.writeAll(rows, true)
 	s := d.String()
 	exp := "|Name:  |Count:|\n----------------\n Kenobi  1      \n----------------"
 	if s != exp {
